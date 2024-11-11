@@ -3,7 +3,7 @@ services:
     build:
       context: .
     container_name: lichess
-    command: air ./cmd/main.go -b 0.0.0.0
+    command: air main.go -b 0.0.0.0
     volumes:
       - ./:/usr/app
 
