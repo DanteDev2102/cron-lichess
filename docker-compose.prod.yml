@@ -1,0 +1,8 @@
+services:
+  app:
+    build:
+      dockerfile: ./Dockerfile.prod
+      context: .
+    container_name: lichess-prod
+    volumes:
+      - ./:/usr/app
