@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/smtp"
 	"os"
+	"sync"
 	"time"
 
 	godotenv "github.com/joho/godotenv"
@@ -37,6 +38,7 @@ type Tournament struct {
 
 func main() {
 	tournaments := make(map[int64]bool)
+	var mutex sync.Mutex
 	err := godotenv.Load()
 
 	if err != nil {
@@ -90,13 +92,17 @@ func main() {
 
 		startDate := fixedTime.UnixNano() / 1000000
 
+		mutex.Lock()
 		_, ok := tournaments[startDate]
 
 		if ok {
+			mutex.Unlock()
 			return
 		}
 
+		tournaments = make(map[int64]bool)
 		tournaments[startDate] = true
+		mutex.Unlock()
 
 		payload := Tournament{
 			Name:             "Torneo de los viernes DCyT",
@@ -120,13 +126,15 @@ func main() {
 		reqBody, err := json.Marshal(payload)
 
 		if err != nil {
-			log.Panic(err)
+			log.Error(err)
+			return
 		}
 
 		req, err := http.NewRequest(http.MethodPost, url+"/tournament", bytes.NewBuffer(reqBody))
 
 		if err != nil {
-			log.Panic(err)
+			log.Error(err)
+			return
 		}
 
 		req.Header.Set("Content-Type", "application/json")
@@ -135,7 +143,8 @@ func main() {
 		res, err := client.Do(req)
 
 		if err != nil {
-			log.Panic(err)
+			log.Error(err)
+			return
 		}
 
 		defer res.Body.Close()
@@ -143,13 +152,15 @@ func main() {
 		body, err := io.ReadAll(res.Body)
 
 		if err != nil {
-			log.Panic(err)
+			log.Error(err)
+			return
 		}
 
 		err = json.Unmarshal(body, &data)
 
 		if err != nil {
-			log.Panic(err)
+			log.Error(err)
+			return
 		}
 
 		id := fmt.Sprintf("%v", data["id"])
@@ -159,7 +170,8 @@ func main() {
 		auth := smtp.PlainAuth("", from, password, host)
 
 		if err := smtp.SendMail(host+":"+port, auth, from, toList, msg); err != nil {
-			log.Panic(err)
+			log.Error(err)
+			return
 		}
 
 		log.Info("Finish Cron")
