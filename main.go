@@ -1,26 +1,28 @@
 package main
 
 import (
-	"net/http"
-	"io/ioutil"
-	"os"
 	"bytes"
 	"encoding/json"
-	"time"
 	"fmt"
+	"io"
+	"math/rand"
+	"net/http"
 	"net/smtp"
+	"os"
+	"sync"
+	"time"
 
+	godotenv "github.com/joho/godotenv"
 	cron "github.com/robfig/cron/v3"
 	log "github.com/sirupsen/logrus"
-	godotenv "github.com/joho/godotenv"
 )
 
 type Tournament struct {
-	Name 			 string  `json:"name"`
-	ClockTime 		 float32  `json:"clockTime"`
-	ClockIncrement 	 int 	 `json:"clockIncrement"`
-	Minutes 		 int 	 `json:"minutes"`
-	WaitMinutes 	 int 	 `json:"waitMinutes"`
+	Name             string  `json:"name"`
+	ClockTime        float32 `json:"clockTime"`
+	ClockIncrement   int     `json:"clockIncrement"`
+	Minutes          int     `json:"minutes"`
+	WaitMinutes      int     `json:"waitMinutes"`
 	StartDate        int64   `json:"startDate"`
 	Variant          string  `json:"variant"`
 	Position         string  `json:"position"`
@@ -29,16 +31,18 @@ type Tournament struct {
 	Streakable       bool    `json:"streakable"`
 	HasChat          bool    `json:"hasChat"`
 	Description      string  `json:"description"`
-	Password 		 string  `json:"password"`
+	Password         string  `json:"password"`
 	TeamBattleByTeam string  `json:"teamBattleByTeam"`
 	TeamID           string  `json:"conditions.teamMember.teamId"`
 }
 
 func main() {
-	enverr := godotenv.Load()
+	tournaments := make(map[int64]bool)
+	var mutex sync.Mutex
+	err := godotenv.Load()
 
-	if enverr != nil {
-		log.Panic(enverr)
+	if err != nil {
+		log.Panic(err)
 	}
 
 	client := &http.Client{}
@@ -47,7 +51,7 @@ func main() {
 	token := os.Getenv("LICHESS_TOKEN")
 	url := os.Getenv("LICHESS_URL")
 	host := os.Getenv("SMTP_HOST")
-    port := os.Getenv("SMTP_PORT")
+	port := os.Getenv("SMTP_PORT")
 	from := os.Getenv("SMTP_FROM")
 	password := os.Getenv("SMTP_PASS")
 	target := os.Getenv("SMTP_TARGET")
@@ -67,8 +71,16 @@ func main() {
 	log.SetFormatter(&log.JSONFormatter{})
 	log.SetOutput(file)
 
-	c.AddFunc(period, func () {
+	times := []float32{1.0, 3.0, 5.0, 8.0, 10.0}
+	increments := []int{0, 1, 2, 3, 5}
+	variants := []string{"standard", "chess960", "crazyhouse", "horde", "racingKings"}
+
+	r := rand.New(rand.NewSource(time.Now().UnixNano()))
+
+	c.AddFunc(period, func() {
 		log.Info("Init Cron")
+
+		randIndex := r.Intn(len(times))
 
 		var data map[string]interface{}
 
@@ -80,58 +92,75 @@ func main() {
 
 		startDate := fixedTime.UnixNano() / 1000000
 
+		mutex.Lock()
+		_, ok := tournaments[startDate]
+
+		if ok {
+			mutex.Unlock()
+			return
+		}
+
+		tournaments = make(map[int64]bool)
+		tournaments[startDate] = true
+		mutex.Unlock()
+
 		payload := Tournament{
-			"Torneo de los viernes DCyT",
-			5.0,
-			3,
-			45,
-			10,
-			startDate,
-			"standard",
-			"",
-			false,
-			true,
-			true,
-			true,
-			"",
-			"",
-			"",
-			"",
+			Name:             "Torneo de los viernes DCyT",
+			ClockTime:        times[randIndex],
+			ClockIncrement:   increments[randIndex],
+			Minutes:          60,
+			WaitMinutes:      10,
+			StartDate:        startDate,
+			Variant:          variants[randIndex],
+			Position:         "",
+			Rated:            false,
+			Berserkable:      true,
+			Streakable:       true,
+			HasChat:          true,
+			Description:      "",
+			Password:         "",
+			TeamBattleByTeam: "",
+			TeamID:           "",
 		}
 
 		reqBody, err := json.Marshal(payload)
 
-        if err != nil {
-			log.Panic(err)
-        }
+		if err != nil {
+			log.Error(err)
+			return
+		}
 
-		req, err := http.NewRequest(http.MethodPost, url + "/tournament", bytes.NewBuffer(reqBody))
+		req, err := http.NewRequest(http.MethodPost, url+"/tournament", bytes.NewBuffer(reqBody))
 
 		if err != nil {
-			log.Panic(err)
+			log.Error(err)
+			return
 		}
 
 		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Authorization", "Bearer " + token)
+		req.Header.Set("Authorization", "Bearer "+token)
 
 		res, err := client.Do(req)
 
 		if err != nil {
-			log.Panic(err)
+			log.Error(err)
+			return
 		}
 
 		defer res.Body.Close()
 
-		body, err := ioutil.ReadAll(res.Body)
+		body, err := io.ReadAll(res.Body)
 
-    	if err != nil {
-    		log.Panic(err)
-    	}
+		if err != nil {
+			log.Error(err)
+			return
+		}
 
-		e := json.Unmarshal(body, &data)
+		err = json.Unmarshal(body, &data)
 
-		if e != nil {
-			log.Panic(e)
+		if err != nil {
+			log.Error(err)
+			return
 		}
 
 		id := fmt.Sprintf("%v", data["id"])
@@ -140,8 +169,9 @@ func main() {
 
 		auth := smtp.PlainAuth("", from, password, host)
 
-		if err := smtp.SendMail(host + ":" + port, auth, from, toList, msg) ; err != nil {
-			log.Panic(err)
+		if err := smtp.SendMail(host+":"+port, auth, from, toList, msg); err != nil {
+			log.Error(err)
+			return
 		}
 
 		log.Info("Finish Cron")

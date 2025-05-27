@@ -31,3 +31,5 @@ Create a tournament and it automatically sends you a template message with the t
 ```sh
     docker compose -f docker-compose.prod.yml up --build -d
 ```
+
+test
