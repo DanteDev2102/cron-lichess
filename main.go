@@ -37,7 +37,7 @@ type Tournament struct {
 }
 
 func main() {
-	tournaments := make(map[int64]bool)
+	tournaments := make(map[string]bool)
 	var mutex sync.Mutex
 	err := godotenv.Load()
 
@@ -93,14 +93,15 @@ func main() {
 		startDate := fixedTime.UnixNano() / 1000000
 
 		mutex.Lock()
-		_, ok := tournaments[startDate]
+		key := fmt.Sprintf("%d/%d/%d", now.Year(), now.Month(), now.Day())
+		_, ok := tournaments[key]
 
 		if ok {
 			mutex.Unlock()
 			return
 		}
 
-		tournaments = make(map[int64]bool)
+		tournaments = make(map[string]bool)
 		tournaments[startDate] = true
 		mutex.Unlock()
 
